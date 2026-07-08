@@ -11,9 +11,8 @@ function Logo() {
   )
 }
 
-// Step indicator shown at the top of the wizard
 function StepIndicator({ current, total }: { current: number; total: number }) {
-  const labels = ['Your details', 'Important information', 'Authorisation', 'Two-factor setup']
+  const labels = ['Your details', 'Important information', 'Authorisation', 'Verify email']
   return (
     <div className="flex items-center gap-0 mb-8">
       {labels.map((label, i) => {
@@ -57,13 +56,11 @@ export default function Register() {
   const [address, setAddress] = useState('')
   const [postcode, setPostcode] = useState('')
 
-  // Step 2 — the legal explanation timestamp is captured when
-  // the step renders, not when the user clicks "I understand".
-  // Storing it in a ref (not state) so it isn't affected by re-renders.
+  // Step 2 — explanation timestamp captured when page renders
   const explanationShownAt = useRef<string | null>(null)
   const [explanationConfirmed, setExplanationConfirmed] = useState(false)
 
-  // Step 3 — three separate consents for absolute clarity
+  // Step 3 — three explicit consents
   const [consentIntermediary, setConsentIntermediary] = useState(false)
   const [consentTaxpayer, setConsentTaxpayer] = useState(false)
   const [consentLiability, setConsentLiability] = useState(false)
@@ -74,7 +71,6 @@ export default function Register() {
     }
   }, [step])
 
-  // ── Step 1 validation and Supabase signup ──────────────────
   const handleStep1 = async () => {
     setError(null)
     if (!firstName.trim()) { setError('First name is required.'); return }
@@ -82,11 +78,9 @@ export default function Register() {
     if (!email.trim()) { setError('Email address is required.'); return }
     if (!address.trim()) { setError('Home address is required.'); return }
     if (!postcode.trim()) { setError('Postcode is required.'); return }
-
     const strengthError = passwordStrengthMessage(password)
     if (strengthError) { setError(strengthError); return }
     if (password !== confirmPassword) { setError('Passwords do not match.'); return }
-
     setLoading(true)
     try {
       const breached = await isPasswordBreached(password)
@@ -100,7 +94,6 @@ export default function Register() {
     }
   }
 
-  // ── Step 2 — legal explanation confirmed ──────────────────
   const handleStep2 = () => {
     if (!explanationConfirmed) {
       setError('Please confirm you have read and understood the information above.')
@@ -110,7 +103,6 @@ export default function Register() {
     setStep(3)
   }
 
-  // ── Step 3 — authorisation granted, create account ────────
   const handleStep3 = async () => {
     setError(null)
     if (!consentIntermediary || !consentTaxpayer || !consentLiability) {
@@ -119,42 +111,47 @@ export default function Register() {
     }
     setLoading(true)
     try {
-      // Create the Supabase auth user
-      const { data: authData, error: authErr } = await supabase.auth.signUp({
-        email: email.trim(),
-        password,
-      })
-      if (authErr) throw authErr
-      if (!authData.user) throw new Error('Account creation failed — please try again.')
-
-      const { data: { session } } = await supabase.auth.getSession()
-      const token = session?.access_token
-      if (!token) throw new Error('Could not get session after signup.')
-
-      // Create the donor profile and authorisation records
       const now = new Date()
       const taxYearFrom = getTaxYear(now)
-      const taxYearTo = now.getMonth() >= 2 // March = index 2
+      const taxYearTo = now.getMonth() >= 2
         ? getNextTaxYear(taxYearFrom)
         : taxYearFrom
 
-      const resp = await fetch('/api/donor/register', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({
-          firstName: firstName.trim(),
-          lastName: lastName.trim(),
-          address: address.trim(),
-          postcode: postcode.trim().toUpperCase(),
-          explanationShownAt: explanationShownAt.current,
-          authorisationDate: now.toISOString(),
-          taxYearFrom,
-          taxYearTo,
-        }),
+      // Store all profile data in Supabase user metadata so it can be
+      // retrieved after email confirmation without needing a session now.
+      const { error: signUpErr } = await supabase.auth.signUp({
+        email: email.trim(),
+        password,
+        options: {
+          // Profile data stored in metadata — read by /api/donor/register
+          // after the donor confirms their email and a session is established.
+          data: {
+            first_name: firstName.trim(),
+            last_name: lastName.trim(),
+            address: address.trim(),
+            postcode: postcode.trim().toUpperCase(),
+            explanation_shown_at: explanationShownAt.current,
+            authorisation_date: now.toISOString(),
+            tax_year_from: taxYearFrom,
+            tax_year_to: taxYearTo,
+          },
+          // After clicking the email link, donor lands on MFA setup
+          // where the profile is created and MFA is configured.
+          emailRedirectTo: `${window.location.origin}/mfa-setup`,
+        },
       })
-      const json = await resp.json()
-      if (!resp.ok || !json.ok) throw new Error(json.error || 'Failed to create donor profile.')
 
+      if (signUpErr) {
+        if (signUpErr.message.includes('already registered')) {
+          setError('An account with this email address already exists. Please log in instead.')
+        } else {
+          throw signUpErr
+        }
+        return
+      }
+
+      // Move to "check your email" step — no session yet, that comes
+      // after the donor clicks the confirmation link.
       setStep(4)
     } catch (e: any) {
       setError(e.message)
@@ -162,9 +159,6 @@ export default function Register() {
       setLoading(false)
     }
   }
-
-  // ── Step 4 — MFA setup complete ───────────────────────────
-  const handleMfaDone = () => { navigate('/dashboard') }
 
   return (
     <div className="min-h-screen bg-brand-surface flex flex-col">
@@ -235,6 +229,11 @@ export default function Register() {
                 <label className="block text-xs font-semibold text-gray-500 mb-1">Confirm password <span className="text-red-500">*</span></label>
                 <input type="password" value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)}
                   className="w-full border border-gray-200 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-accent/30" />
+                {password && confirmPassword && (
+                  <p className={`text-xs mt-1 ${password === confirmPassword ? 'text-green-600' : 'text-red-500'}`}>
+                    {password === confirmPassword ? 'Passwords match ✓' : 'Passwords do not match'}
+                  </p>
+                )}
               </div>
               <button onClick={handleStep1} disabled={loading}
                 className="w-full bg-brand-accent text-white rounded-lg py-2.5 text-sm font-semibold hover:opacity-90 disabled:opacity-40 mt-2">
@@ -251,31 +250,22 @@ export default function Register() {
             <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6 space-y-4">
               <h2 className="font-semibold text-brand-primary">Important information</h2>
               <p className="text-xs text-gray-400">Please read the following carefully before continuing.</p>
-
               <div className="bg-brand-surface border border-brand-accent/20 rounded-lg p-4 space-y-3 text-sm text-gray-700">
                 <p className="font-semibold text-brand-primary">What Gift Aid is</p>
                 <p>Gift Aid allows UK charities to reclaim the basic rate of Income Tax on your donations. For every £1 you give, the charity receives an extra 25p from HMRC — at no cost to you.</p>
-
                 <p className="font-semibold text-brand-primary mt-3">What you are authorising</p>
-                <p>By registering with Gift Aided, you are authorising <strong>Gift Aided Ltd</strong> to create Gift Aid declarations on your behalf for donations you make to charities that work with Gift Aided. This means Gift Aid will be applied automatically — you do not need to tick a box or fill in a form each time you donate.</p>
-
-                <p className="font-semibold text-brand-primary mt-3">Your tax obligation — please read this carefully</p>
-                <p>To use Gift Aid, you must have paid enough UK Income Tax or Capital Gains Tax in the current tax year to cover the amount of Gift Aid claimed across <strong>all</strong> your charitable donations — not just those through Gift Aided.</p>
-                <p className="font-semibold">If you have not paid enough tax to cover the Gift Aid amount, HMRC may ask you to personally pay the difference. This is your responsibility, not the charity's.</p>
-                <p>If your tax situation changes at any time — for example, if you stop paying UK tax — you must cancel your Gift Aid authorisation immediately. You can do this at any time from your account dashboard.</p>
-
+                <p>By registering with Gift Aided, you are authorising <strong>Gift Aided Ltd</strong> to create Gift Aid declarations on your behalf for donations you make to charities that work with Gift Aided.</p>
+                <p className="font-semibold text-brand-primary mt-3">Your tax obligation — please read carefully</p>
+                <p>You must have paid enough UK Income Tax or Capital Gains Tax in the current tax year to cover the amount of Gift Aid claimed across <strong>all</strong> your charitable donations.</p>
+                <p className="font-semibold">If you have not paid enough tax, HMRC may ask you to personally pay the difference.</p>
+                <p>If your tax situation changes, you must cancel your Gift Aid authorisation immediately from your account dashboard.</p>
                 <p className="font-semibold text-brand-primary mt-3">Your data</p>
-                <p>Gift Aided will hold your name, address, and giving history to create declarations on your behalf. We will send you one annual statement each May summarising what was claimed. We will never sell your data or use it for any purpose other than Gift Aid administration.</p>
-
-                <p className="font-semibold text-brand-primary mt-3">Cancelling at any time</p>
-                <p>You can cancel your Gift Aid authorisation at any time from your dashboard. Cancellation stops any new declarations being created from that date — it does not affect declarations already made for past donations.</p>
+                <p>Gift Aided will hold your name, address, and giving history to create declarations on your behalf. We will send you one annual statement each May. We will never sell your data.</p>
               </div>
-
               <label className="flex items-start gap-3 cursor-pointer">
                 <input type="checkbox" checked={explanationConfirmed} onChange={e => setExplanationConfirmed(e.target.checked)} className="mt-1" />
-                <span className="text-sm text-gray-700">I have read and understood the information above, including my personal tax obligation regarding Gift Aid.</span>
+                <span className="text-sm text-gray-700">I have read and understood the information above, including my personal tax obligation.</span>
               </label>
-
               <button onClick={handleStep2}
                 className="w-full bg-brand-accent text-white rounded-lg py-2.5 text-sm font-semibold hover:opacity-90">
                 I understand — continue
@@ -287,33 +277,21 @@ export default function Register() {
           {step === 3 && (
             <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6 space-y-4">
               <h2 className="font-semibold text-brand-primary">Give authorisation</h2>
-              <p className="text-sm text-gray-500">
-                Please tick all three boxes to confirm your authorisation. This is the legal basis on which Gift Aided creates Gift Aid declarations on your behalf.
-              </p>
-
+              <p className="text-sm text-gray-500">Please tick all three boxes to confirm your authorisation.</p>
               <div className="space-y-3">
                 <label className="flex items-start gap-3 p-3 border border-gray-100 rounded-lg cursor-pointer hover:bg-brand-surface/50">
                   <input type="checkbox" checked={consentIntermediary} onChange={e => setConsentIntermediary(e.target.checked)} className="mt-1 flex-shrink-0" />
-                  <span className="text-sm text-gray-700">
-                    I authorise <strong>Gift Aided Ltd</strong> to create Gift Aid declarations on my behalf for donations I make to charities that work with Gift Aided.
-                  </span>
+                  <span className="text-sm text-gray-700">I authorise <strong>Gift Aided Ltd</strong> to create Gift Aid declarations on my behalf for donations I make to charities that work with Gift Aided.</span>
                 </label>
-
                 <label className="flex items-start gap-3 p-3 border border-gray-100 rounded-lg cursor-pointer hover:bg-brand-surface/50">
                   <input type="checkbox" checked={consentTaxpayer} onChange={e => setConsentTaxpayer(e.target.checked)} className="mt-1 flex-shrink-0" />
-                  <span className="text-sm text-gray-700">
-                    I confirm that I am a UK taxpayer and have paid (or will pay) enough UK Income Tax or Capital Gains Tax to cover the Gift Aid claimed on all my charitable donations.
-                  </span>
+                  <span className="text-sm text-gray-700">I confirm that I am a UK taxpayer and have paid (or will pay) enough UK Income Tax or Capital Gains Tax to cover the Gift Aid claimed on all my charitable donations.</span>
                 </label>
-
                 <label className="flex items-start gap-3 p-3 border border-gray-100 rounded-lg cursor-pointer hover:bg-brand-surface/50">
                   <input type="checkbox" checked={consentLiability} onChange={e => setConsentLiability(e.target.checked)} className="mt-1 flex-shrink-0" />
-                  <span className="text-sm text-gray-700">
-                    I understand that if I do not pay enough tax, HMRC may require me to personally repay the difference, and that I must cancel my Gift Aid authorisation if my tax circumstances change.
-                  </span>
+                  <span className="text-sm text-gray-700">I understand that if I do not pay enough tax, HMRC may require me to personally repay the difference, and that I must cancel my authorisation if my tax circumstances change.</span>
                 </label>
               </div>
-
               <button onClick={handleStep3} disabled={loading}
                 className="w-full bg-brand-accent text-white rounded-lg py-2.5 text-sm font-semibold hover:opacity-90 disabled:opacity-40">
                 {loading ? 'Creating account…' : 'Create my account and give authorisation'}
@@ -321,9 +299,33 @@ export default function Register() {
             </div>
           )}
 
-          {/* ── STEP 4: MFA setup ── */}
+          {/* ── STEP 4: Check your email ── */}
           {step === 4 && (
-            <MfaSetupInline onDone={handleMfaDone} />
+            <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6 text-center space-y-5">
+              <div className="w-16 h-16 bg-brand-accent/10 rounded-full flex items-center justify-center mx-auto">
+                <span className="text-3xl">✉️</span>
+              </div>
+              <div>
+                <h2 className="font-bold text-xl text-brand-primary">Check your email</h2>
+                <p className="text-gray-500 text-sm mt-2">
+                  We've sent a confirmation link to <strong>{email}</strong>.
+                  Click the link in that email to verify your address and continue setting up your account.
+                </p>
+              </div>
+              <div className="bg-brand-surface rounded-lg p-4 text-sm text-gray-600 text-left space-y-2">
+                <p className="font-semibold text-brand-primary">What happens next:</p>
+                <p>1. Check your inbox (and spam folder) for an email from Gift Aided</p>
+                <p>2. Click the confirmation link in the email</p>
+                <p>3. You'll be taken to set up two-factor authentication</p>
+                <p>4. Then your dashboard will be ready</p>
+              </div>
+              <p className="text-xs text-gray-400">
+                Didn't receive the email?{' '}
+                <button onClick={handleStep3} className="text-brand-accent hover:underline font-medium">
+                  Resend confirmation email
+                </button>
+              </p>
+            </div>
           )}
         </div>
       </div>
@@ -331,88 +333,12 @@ export default function Register() {
   )
 }
 
-// Inline MFA setup component — uses Supabase TOTP enrolment
-function MfaSetupInline({ onDone }: { onDone: () => void }) {
-  const [qrCode, setQrCode] = useState<string | null>(null)
-  const [secret, setSecret] = useState<string | null>(null)
-  const [factorId, setFactorId] = useState<string | null>(null)
-  const [code, setCode] = useState('')
-  const [error, setError] = useState<string | null>(null)
-  const [loading, setLoading] = useState(false)
-
-  useEffect(() => {
-    (async () => {
-      const { data, error } = await supabase.auth.mfa.enroll({ factorType: 'totp', friendlyName: 'Gift Aided Donor Portal' })
-      if (error || !data) { setError(error?.message || 'Could not start MFA setup.'); return }
-      setFactorId(data.id)
-      setQrCode(data.totp.qr_code)
-      setSecret(data.totp.secret)
-    })()
-  }, [])
-
-  const verify = async () => {
-    if (!factorId || code.length !== 6) return
-    setLoading(true); setError(null)
-    try {
-      const { data: challengeData, error: challengeErr } = await supabase.auth.mfa.challenge({ factorId })
-      if (challengeErr) throw challengeErr
-      const { error: verifyErr } = await supabase.auth.mfa.verify({ factorId, challengeId: challengeData.id, code })
-      if (verifyErr) throw verifyErr
-      onDone()
-    } catch (e: any) {
-      setError('Incorrect code — please try again.')
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  return (
-    <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6 space-y-4">
-      <h2 className="font-semibold text-brand-primary">Set up two-factor authentication</h2>
-      <p className="text-sm text-gray-500">
-        Your account holds sensitive tax information. Two-factor authentication is required to keep it secure.
-      </p>
-      {error && <div className="bg-red-50 border border-red-200 text-red-700 px-3 py-2 rounded text-sm">{error}</div>}
-      {qrCode ? (
-        <>
-          <p className="text-xs text-gray-400">Scan this QR code with an authenticator app such as Google Authenticator or Authy.</p>
-          <div className="flex justify-center">
-            <img src={qrCode} alt="MFA QR code" className="w-40 h-40 border border-gray-100 rounded" />
-          </div>
-          {secret && (
-            <div className="text-center">
-              <p className="text-xs text-gray-400 mb-1">Or enter this code manually:</p>
-              <code className="text-xs font-mono bg-gray-50 px-2 py-1 rounded border border-gray-200 select-all">{secret}</code>
-            </div>
-          )}
-          <div>
-            <label className="block text-xs font-semibold text-gray-500 mb-1">Enter the 6-digit code from your app</label>
-            <input type="text" inputMode="numeric" maxLength={6}
-              value={code} onChange={e => setCode(e.target.value.replace(/\D/g, ''))}
-              className="w-full border border-gray-200 rounded px-3 py-2 text-sm font-mono text-center tracking-widest focus:outline-none focus:ring-2 focus:ring-brand-accent/30" />
-          </div>
-          <button onClick={verify} disabled={loading || code.length !== 6}
-            className="w-full bg-brand-accent text-white rounded-lg py-2.5 text-sm font-semibold hover:opacity-90 disabled:opacity-40">
-            {loading ? 'Verifying…' : 'Complete registration'}
-          </button>
-        </>
-      ) : (
-        <p className="text-center text-gray-400 text-sm py-6">Setting up two-factor authentication…</p>
-      )}
-    </div>
-  )
-}
-
-// ── Tax year helpers ───────────────────────────────────────
 function getTaxYear(date: Date): string {
-  const y = date.getFullYear()
-  const m = date.getMonth() + 1
-  const d = date.getDate()
+  const y = date.getFullYear(), m = date.getMonth() + 1, d = date.getDate()
   if (m > 4 || (m === 4 && d >= 6)) return `${y}/${String(y + 1).slice(2)}`
   return `${y - 1}/${String(y).slice(2)}`
 }
 function getNextTaxYear(ty: string): string {
-  const startYear = parseInt(ty.split('/')[0], 10)
-  const next = startYear + 1
-  return `${next}/${String(next + 1).slice(2)}`
+  const startYear = parseInt(ty.split('/')[0], 10) + 1
+  return `${startYear}/${String(startYear + 1).slice(2)}`
 }
