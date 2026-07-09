@@ -117,14 +117,10 @@ export default function Register() {
         ? getNextTaxYear(taxYearFrom)
         : taxYearFrom
 
-      // Store all profile data in Supabase user metadata so it can be
-      // retrieved after email confirmation without needing a session now.
-      const { error: signUpErr } = await supabase.auth.signUp({
+      const { data: signUpData, error: signUpErr } = await supabase.auth.signUp({
         email: email.trim(),
         password,
         options: {
-          // Profile data stored in metadata — read by /api/donor/register
-          // after the donor confirms their email and a session is established.
           data: {
             first_name: firstName.trim(),
             last_name: lastName.trim(),
@@ -135,9 +131,7 @@ export default function Register() {
             tax_year_from: taxYearFrom,
             tax_year_to: taxYearTo,
           },
-          // After clicking the email link, donor lands on MFA setup
-          // where the profile is created and MFA is configured.
-          emailRedirectTo: `https://gift-aided-donor-portal.vercel.app',
+          emailRedirectTo: 'https://gift-aided-donor-portal.vercel.app/mfa-setup',
         },
       })
 
@@ -150,15 +144,56 @@ export default function Register() {
         return
       }
 
-      // Move to "check your email" step — no session yet, that comes
-      // after the donor clicks the confirmation link.
-      setStep(4)
+      // If email confirmation is disabled, Supabase returns an immediate
+      // session — go straight to creating the profile and MFA setup.
+      // If email confirmation is enabled, session will be null here and
+      // we show the "check your email" screen instead.
+      if (signUpData?.session) {
+        const token = signUpData.session.access_token
+        const resp = await fetch('/api/donor/register', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            firstName: firstName.trim(),
+            lastName: lastName.trim(),
+            address: address.trim(),
+            postcode: postcode.trim().toUpperCase(),
+            explanationShownAt: explanationShownAt.current,
+            authorisationDate: now.toISOString(),
+            taxYearFrom,
+            taxYearTo,
+          }),
+        })
+        const json = await resp.json()
+        if (!resp.ok && resp.status !== 409) {
+          throw new Error(json.error || 'Failed to create donor profile')
+        }
+        // Profile created — go to MFA setup inline (step 4 becomes MFA)
+        setStep(4)
+      } else {
+        // Email confirmation required — show "check your email" screen
+        setStep(4)
+      }
     } catch (e: any) {
       setError(e.message)
     } finally {
       setLoading(false)
     }
   }
+
+  // Whether step 4 shows MFA setup or "check email" depends on whether
+  // email confirmation is enabled — detected by whether a session exists
+  const [hasSessions, setHasSessions] = useState(false)
+  useEffect(() => {
+    if (step === 4) {
+      supabase.auth.getSession().then(({ data: { session } }) => {
+        setHasSessions(!!session)
+      })
+    }
+  }, [step])
 
   return (
     <div className="min-h-screen bg-brand-surface flex flex-col">
@@ -299,36 +334,115 @@ export default function Register() {
             </div>
           )}
 
-          {/* ── STEP 4: Check your email ── */}
+          {/* ── STEP 4: MFA setup or check email ── */}
           {step === 4 && (
-            <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6 text-center space-y-5">
-              <div className="w-16 h-16 bg-brand-accent/10 rounded-full flex items-center justify-center mx-auto">
-                <span className="text-3xl">✉️</span>
-              </div>
-              <div>
-                <h2 className="font-bold text-xl text-brand-primary">Check your email</h2>
-                <p className="text-gray-500 text-sm mt-2">
-                  We've sent a confirmation link to <strong>{email}</strong>.
-                  Click the link in that email to verify your address and continue setting up your account.
+            hasSessions ? (
+              <MfaSetupInline onDone={() => navigate('/dashboard')} />
+            ) : (
+              <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6 text-center space-y-5">
+                <div className="w-16 h-16 bg-brand-accent/10 rounded-full flex items-center justify-center mx-auto">
+                  <span className="text-3xl">✉️</span>
+                </div>
+                <div>
+                  <h2 className="font-bold text-xl text-brand-primary">Check your email</h2>
+                  <p className="text-gray-500 text-sm mt-2">
+                    We've sent a confirmation link to <strong>{email}</strong>.
+                    Click the link in that email to verify your address and continue setting up your account.
+                  </p>
+                </div>
+                <div className="bg-brand-surface rounded-lg p-4 text-sm text-gray-600 text-left space-y-2">
+                  <p className="font-semibold text-brand-primary">What happens next:</p>
+                  <p>1. Check your inbox (and spam folder) for an email from Gift Aided</p>
+                  <p>2. Click the confirmation link in the email</p>
+                  <p>3. You'll be taken to set up two-factor authentication</p>
+                  <p>4. Then your dashboard will be ready</p>
+                </div>
+                <p className="text-xs text-gray-400">
+                  Didn't receive the email?{' '}
+                  <button onClick={handleStep3} className="text-brand-accent hover:underline font-medium">
+                    Resend confirmation email
+                  </button>
                 </p>
               </div>
-              <div className="bg-brand-surface rounded-lg p-4 text-sm text-gray-600 text-left space-y-2">
-                <p className="font-semibold text-brand-primary">What happens next:</p>
-                <p>1. Check your inbox (and spam folder) for an email from Gift Aided</p>
-                <p>2. Click the confirmation link in the email</p>
-                <p>3. You'll be taken to set up two-factor authentication</p>
-                <p>4. Then your dashboard will be ready</p>
-              </div>
-              <p className="text-xs text-gray-400">
-                Didn't receive the email?{' '}
-                <button onClick={handleStep3} className="text-brand-accent hover:underline font-medium">
-                  Resend confirmation email
-                </button>
-              </p>
-            </div>
+            )
           )}
         </div>
       </div>
+    </div>
+  )
+}
+
+function MfaSetupInline({ onDone }: { onDone: () => void }) {
+  const [qrCode, setQrCode] = useState<string | null>(null)
+  const [secret, setSecret] = useState<string | null>(null)
+  const [factorId, setFactorId] = useState<string | null>(null)
+  const [code, setCode] = useState('')
+  const [error, setError] = useState<string | null>(null)
+  const [loading, setLoading] = useState(false)
+
+  useEffect(() => {
+    (async () => {
+      const { data, error } = await supabase.auth.mfa.enroll({
+        factorType: 'totp',
+        friendlyName: 'Gift Aided Donor Portal',
+      })
+      if (error || !data) { setError(error?.message || 'Could not start MFA setup.'); return }
+      setFactorId(data.id)
+      setQrCode(data.totp.qr_code)
+      setSecret(data.totp.secret)
+    })()
+  }, [])
+
+  const verify = async () => {
+    if (!factorId || code.length !== 6) return
+    setLoading(true); setError(null)
+    try {
+      const { data: ch, error: chErr } = await supabase.auth.mfa.challenge({ factorId })
+      if (chErr) throw chErr
+      const { error: vErr } = await supabase.auth.mfa.verify({ factorId, challengeId: ch.id, code })
+      if (vErr) throw vErr
+      onDone()
+    } catch {
+      setError('Incorrect code — please try again.')
+      setLoading(false)
+    }
+  }
+
+  return (
+    <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6 space-y-4">
+      <div className="text-center">
+        <div className="w-10 h-10 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-3">
+          <span className="text-green-600 text-lg">✓</span>
+        </div>
+        <h2 className="font-bold text-brand-primary">Account created!</h2>
+        <p className="text-sm text-gray-500 mt-1">Set up two-factor authentication to secure your account.</p>
+      </div>
+      {error && <div className="bg-red-50 border border-red-200 text-red-700 px-3 py-2 rounded text-sm">{error}</div>}
+      {qrCode ? (
+        <>
+          <p className="text-xs text-gray-400 text-center">Scan with Google Authenticator or Authy.</p>
+          <div className="flex justify-center">
+            <img src={qrCode} alt="MFA QR code" className="w-40 h-40 border border-gray-100 rounded" />
+          </div>
+          {secret && (
+            <p className="text-center text-xs font-mono bg-gray-50 border border-gray-200 rounded px-2 py-1 select-all break-all">
+              {secret}
+            </p>
+          )}
+          <input
+            type="text" inputMode="numeric" maxLength={6} placeholder="6-digit code"
+            value={code} onChange={e => setCode(e.target.value.replace(/\D/g, ''))}
+            onKeyDown={e => e.key === 'Enter' && verify()}
+            className="w-full border border-gray-200 rounded px-3 py-2 text-sm font-mono text-center tracking-widest focus:outline-none focus:ring-2 focus:ring-brand-accent/30"
+          />
+          <button onClick={verify} disabled={loading || code.length !== 6}
+            className="w-full bg-brand-accent text-white rounded-lg py-2.5 text-sm font-semibold hover:opacity-90 disabled:opacity-40">
+            {loading ? 'Verifying…' : 'Complete registration'}
+          </button>
+        </>
+      ) : (
+        <p className="text-center text-gray-400 text-sm py-4">Setting up two-factor authentication…</p>
+      )}
     </div>
   )
 }
