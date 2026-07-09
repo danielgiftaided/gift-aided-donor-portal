@@ -137,7 +137,7 @@ export default function Register() {
           },
           // After clicking the email link, donor lands on MFA setup
           // where the profile is created and MFA is configured.
-          emailRedirectTo: `https://donors.giftaided.com/mfa-setup/mfa-setup`,
+          emailRedirectTo: `https://donors.giftaided.com',
         },
       })
 
