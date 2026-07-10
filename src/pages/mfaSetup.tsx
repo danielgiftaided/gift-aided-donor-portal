@@ -59,10 +59,26 @@ export default function MfaSetup() {
         },
         body: JSON.stringify({}),
       })
-      const json = await resp.json()
+
+      // Safely parse the response — the server may return HTML on a crash
+      // rather than JSON, which would cause a parse error if not handled.
+      let json: any = {}
+      try {
+        const text = await resp.text()
+        json = text ? JSON.parse(text) : {}
+      } catch {
+        // Server returned non-JSON (e.g. Vercel error page) — treat as
+        // a server error but with a clear message rather than a parse crash.
+        if (!resp.ok) {
+          throw new Error(
+            `Server error (${resp.status}) — check that SUPABASE_URL, SUPABASE_ANON_KEY and SUPABASE_SERVICE_ROLE_KEY are set in your Vercel environment variables for the donor portal project.`
+          )
+        }
+      }
+
       // 409 means profile already exists — that's fine, just proceed to MFA
       if (!resp.ok && resp.status !== 409) {
-        throw new Error(json.error || 'Failed to create donor profile')
+        throw new Error(json.error || `Server error ${resp.status}`)
       }
     } catch (e: any) {
       setError(e.message)
