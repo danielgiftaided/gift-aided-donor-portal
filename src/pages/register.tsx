@@ -286,16 +286,14 @@ export default function Register() {
               <h2 className="font-semibold text-brand-primary">Important information</h2>
               <p className="text-xs text-gray-400">Please read the following carefully before continuing.</p>
               <div className="bg-brand-surface border border-brand-accent/20 rounded-lg p-4 space-y-3 text-sm text-gray-700">
-                <p className="font-semibold text-brand-primary">What Gift Aid is</p>
-                <p>Gift Aid allows UK charities to reclaim the basic rate of Income Tax on your donations. For every £1 you give, the charity receives an extra 25p from HMRC — at no cost to you.</p>
-                <p className="font-semibold text-brand-primary mt-3">What you are authorising</p>
-                <p>By registering with Gift Aided, you are authorising <strong>Gift Aided Ltd</strong> to create Gift Aid declarations on your behalf for donations you make to charities that work with Gift Aided.</p>
-                <p className="font-semibold text-brand-primary mt-3">Your tax obligation — please read carefully</p>
-                <p>You must have paid enough UK Income Tax or Capital Gains Tax in the current tax year to cover the amount of Gift Aid claimed across <strong>all</strong> your charitable donations.</p>
-                <p className="font-semibold">If you have not paid enough tax, HMRC may ask you to personally pay the difference.</p>
-                <p>If your tax situation changes, you must cancel your Gift Aid authorisation immediately from your account dashboard.</p>
+                <p className="font-semibold text-brand-primary">What is Gift Aid?</p>
+                <p>Gift Aid lets UK charities claim an extra 25p from HMRC for every £1 you donate — at no cost to you. By registering once with Gift Aided, this happens automatically for every donation you make to charities on our platform.</p>
+
+                <p className="font-semibold text-brand-primary mt-3">Your tax obligation</p>
+                <p>You must pay enough UK Income Tax or Capital Gains Tax to cover the Gift Aid claimed on <strong>all</strong> your charitable donations. <strong>If you haven't paid enough tax, HMRC may ask you to pay the difference personally.</strong> If your tax situation changes, cancel your authorisation immediately from your dashboard.</p>
+
                 <p className="font-semibold text-brand-primary mt-3">Your data</p>
-                <p>Gift Aided will hold your name, address, and giving history to create declarations on your behalf. We will send you one annual statement each May. We will never sell your data.</p>
+                <p>We hold your name, address, and giving history solely to create Gift Aid declarations on your behalf. You'll receive one annual statement each May. We never sell your data. You can cancel at any time.</p>
               </div>
               <label className="flex items-start gap-3 cursor-pointer">
                 <input type="checkbox" checked={explanationConfirmed} onChange={e => setExplanationConfirmed(e.target.checked)} className="mt-1" />
@@ -316,15 +314,23 @@ export default function Register() {
               <div className="space-y-3">
                 <label className="flex items-start gap-3 p-3 border border-gray-100 rounded-lg cursor-pointer hover:bg-brand-surface/50">
                   <input type="checkbox" checked={consentIntermediary} onChange={e => setConsentIntermediary(e.target.checked)} className="mt-1 flex-shrink-0" />
-                  <span className="text-sm text-gray-700">I authorise <strong>Gift Aided Ltd</strong> to create Gift Aid declarations on my behalf for donations I make to charities that work with Gift Aided.</span>
+                  <span className="text-sm text-gray-700">
+                    I authorise <strong>Gift Aided Ltd</strong> to create Gift Aid declarations on my behalf for donations I make to charities working with Gift Aided.
+                  </span>
                 </label>
+
                 <label className="flex items-start gap-3 p-3 border border-gray-100 rounded-lg cursor-pointer hover:bg-brand-surface/50">
                   <input type="checkbox" checked={consentTaxpayer} onChange={e => setConsentTaxpayer(e.target.checked)} className="mt-1 flex-shrink-0" />
-                  <span className="text-sm text-gray-700">I confirm that I am a UK taxpayer and have paid (or will pay) enough UK Income Tax or Capital Gains Tax to cover the Gift Aid claimed on all my charitable donations.</span>
+                  <span className="text-sm text-gray-700">
+                    I am a UK taxpayer and have paid (or will pay) enough Income Tax or Capital Gains Tax to cover the Gift Aid claimed on all my charitable donations.
+                  </span>
                 </label>
+
                 <label className="flex items-start gap-3 p-3 border border-gray-100 rounded-lg cursor-pointer hover:bg-brand-surface/50">
                   <input type="checkbox" checked={consentLiability} onChange={e => setConsentLiability(e.target.checked)} className="mt-1 flex-shrink-0" />
-                  <span className="text-sm text-gray-700">I understand that if I do not pay enough tax, HMRC may require me to personally repay the difference, and that I must cancel my authorisation if my tax circumstances change.</span>
+                  <span className="text-sm text-gray-700">
+                    I understand that if I don't pay enough tax, HMRC may require me to repay the difference, and I will cancel this authorisation if my tax circumstances change.
+                  </span>
                 </label>
               </div>
               <button onClick={handleStep3} disabled={loading}
