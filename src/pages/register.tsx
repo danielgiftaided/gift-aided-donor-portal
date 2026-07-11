@@ -131,7 +131,7 @@ export default function Register() {
             tax_year_from: taxYearFrom,
             tax_year_to: taxYearTo,
           },
-          emailRedirectTo: 'https://gift-aided-donor-portal.vercel.app/mfa-setup',
+          emailRedirectTo: 'https://donors.giftaided.com/mfa-setup',
         },
       })
 
