@@ -11,44 +11,38 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (req.method !== 'GET') return send(res, 405, { ok: false, error: 'Method not allowed' })
     await requireAdmin(req)
 
-    const [donors, donations, authorisations] = await Promise.all([
-      supabaseAdmin.from('intermediary_donors').select('id, status, created_at'),
-      supabaseAdmin.from('platform_donations').select('id, amount, gift_aid_status, donation_date, charity_name'),
-      supabaseAdmin.from('donor_authorisations').select('id, status, tax_year_from'),
-    ])
+    const limit = Math.min(parseInt(String(req.query.limit ?? '50'), 10) || 50, 200)
+    const offset = parseInt(String(req.query.offset ?? '0'), 10) || 0
+    const status = req.query.status as string | undefined
 
-    const totalDonors = donors.data?.length || 0
-    const activeDonors = donors.data?.filter(d => d.status === 'active').length || 0
-    const totalDonations = donations.data?.length || 0
-    const matchedDonations = donations.data?.filter(d => d.gift_aid_status === 'matched').length || 0
-    const unmatchedDonations = donations.data?.filter(d => d.gift_aid_status === 'no_match' || d.gift_aid_status === 'pending').length || 0
-    const totalGiftAid = (donations.data || [])
-      .filter(d => d.gift_aid_status === 'matched')
-      .reduce((s, d) => s + Math.round((d.amount || 0) * 0.25 * 100) / 100, 0)
-    const matchRate = totalDonations > 0 ? Math.round((matchedDonations / totalDonations) * 100) : 0
+    let query = supabaseAdmin
+      .from('platform_donations')
+      .select('id, charity_name, charity_hmrc_ref, donor_name_submitted, donor_postcode_submitted, amount, donation_date, gift_aid_status, matched_donor_id, received_at', { count: 'exact' })
+      .order('received_at', { ascending: false })
+      .range(offset, offset + limit - 1)
 
-    // New donors in last 30 days
-    const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString()
-    const newDonors = donors.data?.filter(d => d.created_at > thirtyDaysAgo).length || 0
+    if (status && status !== 'all') query = query.eq('gift_aid_status', status)
 
-    // Charity breakdown
-    const charityMap: Record<string, { name: string; donations: number; giftAid: number }> = {}
-    for (const d of donations.data || []) {
-      const key = d.charity_name || 'Unknown'
-      if (!charityMap[key]) charityMap[key] = { name: key, donations: 0, giftAid: 0 }
-      charityMap[key].donations++
-      if (d.gift_aid_status === 'matched') {
-        charityMap[key].giftAid += Math.round((d.amount || 0) * 0.25 * 100) / 100
-      }
+    const { data, error, count } = await query
+    if (error) return send(res, 500, { ok: false, error: error.message })
+
+    const matchedIds = (data || []).filter(d => d.matched_donor_id).map(d => d.matched_donor_id)
+    let donorMap: Record<string, any> = {}
+    if (matchedIds.length > 0) {
+      const { data: donors } = await supabaseAdmin
+        .from('intermediary_donors')
+        .select('id, first_name, last_name, postcode')
+        .in('id', matchedIds)
+      for (const d of donors || []) donorMap[d.id] = d
     }
-    const charityBreakdown = Object.values(charityMap).sort((a, b) => b.giftAid - a.giftAid).slice(0, 10)
 
-    return send(res, 200, {
-      ok: true,
-      totalDonors, activeDonors, newDonors,
-      totalDonations, matchedDonations, unmatchedDonations,
-      matchRate, totalGiftAid, charityBreakdown,
-    })
+    const donations = (data || []).map(d => ({
+      ...d,
+      matchedDonor: d.matched_donor_id ? donorMap[d.matched_donor_id] || null : null,
+      giftAid: d.gift_aid_status === 'matched' ? Math.round(d.amount * 0.25 * 100) / 100 : 0,
+    }))
+
+    return send(res, 200, { ok: true, donations, total: count ?? 0 })
   } catch (e: any) {
     return send(res, e.message?.includes('Forbidden') || e.message?.includes('Unauthorised') ? 403 : 500, { ok: false, error: e.message })
   }
