@@ -8,29 +8,67 @@ function send(res: VercelResponse, status: number, body: object) {
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
-    if (req.method !== 'GET') return send(res, 405, { ok: false, error: 'Method not allowed' })
+    if (req.method !== 'POST') return send(res, 405, { ok: false, error: 'Method not allowed' })
     await requireAdmin(req)
 
-    const limit = Math.min(parseInt(String(req.query.limit ?? '50'), 10) || 50, 200)
-    const offset = parseInt(String(req.query.offset ?? '0'), 10) || 0
-    const status = req.query.status as string | undefined
-    const search = req.query.search as string | undefined
+    const body = typeof req.body === 'string' ? JSON.parse(req.body) : req.body
+    const { donation_id, donor_id } = body
+
+    if (!donation_id) return send(res, 400, { ok: false, error: 'donation_id is required' })
+
+    const { data: donation, error: donErr } = await supabaseAdmin
+      .from('platform_donations')
+      .select('*')
+      .eq('id', donation_id)
+      .single()
+
+    if (donErr || !donation) return send(res, 404, { ok: false, error: 'Donation not found' })
+
+    if (donor_id) {
+      const { data: donor, error: dErr } = await supabaseAdmin
+        .from('intermediary_donors')
+        .select('id, status')
+        .eq('id', donor_id)
+        .single()
+
+      if (dErr || !donor) return send(res, 404, { ok: false, error: 'Donor not found' })
+      if (donor.status !== 'active') return send(res, 400, { ok: false, error: 'This donor has cancelled their authorisation' })
+
+      await supabaseAdmin
+        .from('platform_donations')
+        .update({ matched_donor_id: donor_id, gift_aid_status: 'matched', declaration_created_at: new Date().toISOString() })
+        .eq('id', donation_id)
+
+      return send(res, 200, { ok: true, message: 'Match applied successfully' })
+    }
+
+    const nameParts = (donation.donor_name_submitted || '').trim().split(' ')
+    const firstName = nameParts[0] || ''
+    const lastName = nameParts.slice(1).join(' ') || ''
+    const postcode = (donation.donor_postcode_submitted || '').trim().toUpperCase()
 
     let query = supabaseAdmin
       .from('intermediary_donors')
-      .select('id, first_name, last_name, email, postcode, status, created_at, cancelled_at', { count: 'exact' })
-      .order('created_at', { ascending: false })
-      .range(offset, offset + limit - 1)
+      .select('id, first_name, last_name, postcode, status')
+      .eq('status', 'active')
 
-    if (status && status !== 'all') query = query.eq('status', status)
-    if (search) {
-      query = query.or(`first_name.ilike.%${search}%,last_name.ilike.%${search}%,email.ilike.%${search}%`)
-    }
+    if (firstName) query = query.ilike('first_name', firstName)
+    if (lastName) query = query.ilike('last_name', lastName)
 
-    const { data, error, count } = await query
-    if (error) return send(res, 500, { ok: false, error: error.message })
+    const { data: candidates, error: cErr } = await query
+    if (cErr) return send(res, 500, { ok: false, error: cErr.message })
 
-    return send(res, 200, { ok: true, donors: data || [], total: count ?? 0 })
+    const scored = (candidates || []).map(c => {
+      const postcodeMatch = postcode && c.postcode?.toUpperCase() === postcode
+      const confidence = postcodeMatch ? 'high' : candidates!.length === 1 ? 'medium' : 'low'
+      return { ...c, confidence }
+    }).sort((a, b) => {
+      const order = { high: 0, medium: 1, low: 2 }
+      return order[a.confidence as keyof typeof order] - order[b.confidence as keyof typeof order]
+    })
+
+    return send(res, 200, { ok: true, candidates: scored, autoMatched: false })
+
   } catch (e: any) {
     return send(res, e.message?.includes('Forbidden') || e.message?.includes('Unauthorised') ? 403 : 500, { ok: false, error: e.message })
   }
