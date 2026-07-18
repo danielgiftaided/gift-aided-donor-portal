@@ -16,6 +16,7 @@ import AdminDashboard    from './pages/admin/adminDashboard'
 import AdminDonors       from './pages/admin/adminDonors'
 import AdminDonations    from './pages/admin/adminDonations'
 import AdminMatching     from './pages/admin/adminMatching'
+import AdminStatements   from './pages/admin/adminStatements'
 
 export default function App() {
   return (
@@ -45,6 +46,7 @@ export default function App() {
         <Route path="/admin/donors"        element={<AdminDonors />} />
         <Route path="/admin/donations"     element={<AdminDonations />} />
         <Route path="/admin/matching"      element={<AdminMatching />} />
+        <Route path="/admin/statements"    element={<AdminStatements />} />
 
         {/* Default */}
         <Route path="*" element={<Navigate to="/login" replace />} />

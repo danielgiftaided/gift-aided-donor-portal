@@ -14,6 +14,7 @@ const navLinks = [
   { path: '/admin/donors', label: 'Donors' },
   { path: '/admin/donations', label: 'Donations' },
   { path: '/admin/matching', label: 'Matching' },
+  { path: '/admin/statements', label: 'Statements' },
 ]
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
