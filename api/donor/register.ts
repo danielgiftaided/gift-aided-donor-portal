@@ -12,6 +12,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { createClient } from '@supabase/supabase-js'
 import { supabaseAdmin } from '../_utils/supabase.js'
+import { sendEmail, buildFullRegistrationWelcome } from '../_utils/mailer.js'
 
 function send(res: VercelResponse, status: number, body: object) {
   return res.status(status).json(body)
@@ -104,6 +105,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (authRecordErr) {
       return send(res, 500, { ok: false, error: authRecordErr.message })
     }
+
+    // Send welcome email — non-blocking so a send failure doesn't
+    // prevent the registration from completing successfully.
+    const emailName = String(firstName || meta.first_name || '').trim()
+    sendEmail({
+      to: user.email!,
+      subject: 'Welcome to Gift Aided — your Gift Aid is now active',
+      html: buildFullRegistrationWelcome(emailName),
+    }).catch(err => {
+      console.error('Welcome email failed (non-fatal):', err?.message)
+    })
 
     return send(res, 200, { ok: true, donorId: donor.id })
 

@@ -22,6 +22,7 @@ import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { requirePlatformKey } from './_requirePlatformKey.js'
 import { supabaseAdmin } from '../_utils/supabase.js'
 import { randomBytes } from 'crypto'
+import { sendEmail, buildQuickRegisterWelcome } from '../_utils/mailer.js'
 
 function send(res: VercelResponse, status: number, body: object) {
   res.setHeader('Access-Control-Allow-Origin', '*')
@@ -166,17 +167,29 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       })
     }
 
-    // Send "complete your account" email via Supabase magic link
-    // This is non-blocking — registration is confirmed regardless of whether
-    // this email succeeds.
+    // Generate a one-time magic link so the donor can set up their account.
+    // We generate the link first, embed it in our branded email, and send
+    // that via Brevo SMTP rather than Supabase's plain default email.
+    const portalUrl = process.env.DONOR_PORTAL_URL || 'https://donors.giftaided.com'
+
     supabaseAdmin.auth.admin.generateLink({
       type: 'magiclink',
       email: emailClean,
-      options: {
-        redirectTo: `${process.env.DONOR_PORTAL_URL || 'https://donors.giftaided.com'}/mfa-setup`,
-      },
-    }).catch(() => {
-      // Non-fatal — donor can request a new link later
+      options: { redirectTo: `${portalUrl}/dashboard` },
+    }).then(({ data, error }) => {
+      if (error || !data?.properties?.action_link) {
+        console.error('Magic link generation failed (non-fatal):', error?.message)
+        return
+      }
+      const setupLink = data.properties.action_link
+      return sendEmail({
+        to: emailClean,
+        subject: 'Your Gift Aid is activated — complete your Gift Aided account',
+        html: buildQuickRegisterWelcome(firstNameClean, setupLink, campaignName || undefined),
+      })
+    }).catch(err => {
+      // Non-fatal — donor's Gift Aid is active regardless of whether this email sends.
+      console.error('Quick-register welcome email failed (non-fatal):', err?.message)
     })
 
     return send(res, 200, {
