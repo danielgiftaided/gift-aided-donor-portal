@@ -5,5 +5,8 @@
   "rewrites": [
     { "source": "/api/(.*)", "destination": "/api/$1" },
     { "source": "/(.*)",     "destination": "/index.html" }
-  ]
+  ],
+  "env": {
+    "DONOR_PORTAL_URL": "https://donors.giftaided.com"
+  }
 }

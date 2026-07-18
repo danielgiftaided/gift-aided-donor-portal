@@ -9,6 +9,8 @@ import Dashboard         from './pages/dashboard'
 import GivingHistory     from './pages/givingHistory'
 import Authorisation     from './pages/authorisation'
 import Profile           from './pages/profile'
+import QuickRegister     from './pages/quickRegister'
+import QuickRegister     from './pages/quickRegister'
 import AdminLogin        from './pages/admin/adminLogin'
 import AdminMfaChallenge from './pages/admin/adminMfaChallenge'
 import AdminDashboard    from './pages/admin/adminDashboard'
@@ -25,6 +27,8 @@ export default function App() {
         <Route path="/login"           element={<Login />} />
         <Route path="/forgot-password" element={<ForgotPassword />} />
         <Route path="/reset-password"  element={<ResetPassword />} />
+        <Route path="/quick-register"  element={<QuickRegister />} />
+        <Route path="/quick-register"  element={<QuickRegister />} />
 
         {/* Donor auth flow */}
         <Route path="/mfa-setup"       element={<MfaSetup />} />
